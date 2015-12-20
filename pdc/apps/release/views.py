@@ -632,6 +632,64 @@ class ReleaseCloneViewSet(StrictQueryParamMixin, viewsets.GenericViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+class ReleaseComponentCloneViewSet(StrictQueryParamMixin, viewsets.GenericViewSet):
+    queryset = models.Release.objects.none()
+
+    def create(self, request):
+        """
+        Clone all release components, component groups and relationships from one Release
+        to another Release, both they are existed.
+
+        __Method__: POST
+
+        __URL__: $LINK:releasecomponentclone-list$
+
+        __Data__:
+
+            {
+                "source_release_id":            string,
+                "target_release_id":            string
+                "component_dist_git_branch":    string,     # optional
+                "include_inactive":             bool,       # optional
+                "include_trees":                [string],   # optional
+            }
+
+        If `component_dist_git_branch` is present, it will be set for all
+        release components under the target release. If missing, release
+        components will be cloned without changes.
+
+        If `include_inactive` is False, the inactive release_components belong to
+        the old release won't be cloned to target release.
+        Default it will clone all release_components to target release.
+
+        If `include_tree` is specified, it should contain a list of
+        Variant.Arch pairs that should be cloned. If not given, all trees will
+        be cloned. If the list is empty, no trees will be cloned.
+        """
+        data = request.data
+        if 'source_release_id' not in data:
+            return Response({'__all__': 'Missing source_release_id'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        source_release_id = data.pop('source_release_id')
+        if 'target_release_id' not in data:
+            return Response({'__all__': 'Missing target_release_id'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        target_release_id = data.pop('target_release_id')
+        source_release = get_object_or_404(models.Release, release_id=source_release_id)
+
+        target_release = get_object_or_404(models.Release, release_id=target_release_id)
+        target_data = ReleaseSerializer(instance=target_release).data
+        if source_release.releasecomponent_set.count() == 0:
+            return Response(target_data, status=status.HTTP_200_OK)
+
+        signals.rpc_release_clone_component.send(sender=target_release.__class__,
+                                                 request=request,
+                                                 original_release=source_release,
+                                                 release=target_release)
+
+        return Response(target_data, status=status.HTTP_201_CREATED)
+
+
 class ReleaseRPMMappingView(StrictQueryParamMixin, viewsets.GenericViewSet):
     lookup_field = 'package'
     queryset = models.Release.objects.none()   # Required for permissions
